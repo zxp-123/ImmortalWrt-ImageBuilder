@@ -1,12 +1,12 @@
 #!/bin/bash
 
 # ==============================================================================
-# ImmortalWrt 25.12.x - Phicomm N1 (Fully Hardened & Self-Correcting Script)
+# ImmortalWrt 25.12.x - Phicomm N1 (Final Hardened Build Script)
 # ==============================================================================
 
 set -e
 
-# 1. 智能寻找真正的 ImageBuilder 根目录（防目录嵌套报错的核心）
+# 1. 智能寻找真正的 ImageBuilder 根目录
 BASE_DIR="/home/build/immortalwrt"
 if [ ! -f "$BASE_DIR/Makefile" ]; then
     echo "⚠️ 检测到 $BASE_DIR 下缺少 Makefile，正在寻找真实解压目录..."
@@ -158,12 +158,15 @@ else
     echo "⚪️ 未选择 luci-app-ssr-plus"
 fi
 
-# 14. 执行最终镜像编译（在确保持有 Makefile 的真实目录下执行）
+# 14. 执行最终镜像编译（清除残留 TOPDIR，强制锁定 Makefile 所在根目录）
 echo "============================================================"
 echo "🚀 开始构建 ImmortalWrt 25.12.x N1 镜像..."
 echo "============================================================"
 
+unset TOPDIR
+
 make image \
+    TOPDIR="$(pwd)" \
     PROFILE="$PROFILE" \
     PACKAGES="$PACKAGES" \
     FILES="$IB_ROOT/files" \
