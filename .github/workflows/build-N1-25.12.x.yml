@@ -63,7 +63,6 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y gettext kpartx util-linux e2fsprogs dosfstools zstd build-essential libncurses5-dev libncursesw5-dev gawk git subversion libssl-dev python3 unzip rsync device-tree-compiler pigz jq
         
-        # 创建 /home/build 目录并赋予当前 runner 权限
         sudo mkdir -p /home/build
         sudo chown -R $USER:$USER /home/build
 
@@ -107,9 +106,6 @@ jobs:
           exit 1
         fi
 
-        echo "ImageBuilder 解压完成："
-        ls -la
-
     - name: Pre-download Custom APK Packages
       run: |
         chmod -R +x shell/ || true
@@ -129,24 +125,18 @@ jobs:
           exit 1
         fi
 
-        # 1. 安全复制 packages 内容
         cp -rf packages/* ib_dir/packages/ 2>/dev/null || true
-        
-        # 2. 注入配置
         cp -f ${{ env.CONFIG_FILE }} ib_dir/.config
         
-        # 3. 复制 shell 目录
         if [ -d "shell" ]; then
           cp -rf shell ib_dir/
           chmod -R +x ib_dir/shell/
         fi
 
-        # 4. 建立旧 Docker 绝对路径软链接，兼容 build25.sh 中写死的 /home/build/immortalwrt 路径
         sudo mkdir -p /home/build
         sudo ln -snf ${{ github.workspace }}/ib_dir /home/build/immortalwrt
         sudo chown -R $USER:$USER /home/build
 
-        # 5. 给 build25.sh 添加权限并复制
         chmod +x ${{ env.BUILD_SCRIPT }}
         cp -f ${{ env.BUILD_SCRIPT }} ib_dir/build25.sh
 
@@ -161,54 +151,50 @@ jobs:
       run: |
         cd ib_dir
         
-        # 自动提取内核大版本（例如 6.6.93 提取为 6.6），防止 ImageBuilder 找不到 kernel-version.mk 哈希文件
         KERNEL_PATCHVER=$(echo "${OPENWRT_KERNEL}" | cut -d. -f1,2)
-        echo "解析得到的 KERNEL_PATCHVER = ${KERNEL_PATCHVER}"
-        
         export PROFILE="${PROFILE:-generic}"
         export KERNEL_PATCHVER="${KERNEL_PATCHVER}"
+        export TOPDIR="$(pwd)"
         
+        # 仅生成 rootfs 压缩包供后续打包使用
         bash ./build25.sh
 
         mkdir -p ../out
         find bin/targets/armsr/armv8/ -name "*rootfs*.tar.gz" -exec cp -f {} ../out/ \; || true
-        find bin/targets/armsr/armv8/ -name "*.img.gz" -exec cp -f {} ../out/ \; || true
 
-    - name: Package Phicomm N1 S905D (.img) Firmware
+    - name: Package Phicomm N1 S905D (.img) Firmware via mk script
       env:
         OPENWRT_KERNEL: ${{ github.event.inputs.openwrt_kernel }}
         ROOTFS_SIZE: ${{ github.event.inputs.rootfs_size }}
       run: |
-        PACK_SCRIPT=""
+        # 确认打包脚本存在
         if [ -f "n1/mk_s905d_n1.sh" ]; then
-          PACK_SCRIPT="n1/mk_s905d_n1.sh"
-        elif [ -f "mk_s905d_n1.sh" ]; then
-          PACK_SCRIPT="mk_s905d_n1.sh"
-        fi
-
-        if [ -n "${PACK_SCRIPT}" ]; then
           echo "=========================================="
-          echo "找到打包脚本: ${PACK_SCRIPT}，开始生成 N1 S905D .img 镜像"
+          echo "开始调用 n1/mk_s905d_n1.sh 进行 N1 固件专属打包"
           echo "=========================================="
-          
-          chmod +x ${PACK_SCRIPT}
           
           ROOTFS_TAR=$(find out/ -name "*rootfs*.tar.gz" | head -n 1)
           
           if [ -f "${ROOTFS_TAR}" ]; then
-            echo "使用生成的 25.12.x rootfs: ${ROOTFS_TAR}"
+            # 将编译好的 rootfs 复制到 n1 目录下并让打包脚本识别
+            cp -f "${ROOTFS_TAR}" n1/openwrt-armsr-armv8-generic-rootfs.tar.gz
             
-            WORK_DIR=$(dirname ${PACK_SCRIPT})
-            cp -f ${ROOTFS_TAR} ${WORK_DIR}/openwrt-armsr-armv8-rootfs.tar.gz || true
+            cd n1
+            chmod +x mk_s905d_n1.sh
             
-            cd ${WORK_DIR}
-            sudo ./$(basename ${PACK_SCRIPT})
+            # 执行你的 mk 打包脚本
+            sudo ./mk_s905d_n1.sh
             cd -
             
-            find ${WORK_DIR} -maxdepth 2 -name "*.img*" -exec cp -f {} out/ \; || true
+            # 收集打包出来的 .img 固件
+            find n1/ -maxdepth 2 -name "*.img*" -exec cp -f {} out/ \; || true
+          else
+            echo "Error: 未找到生成的 rootfs 压缩包！"
+            exit 1
           fi
         else
-          echo "未找到 mk_s905d_n1.sh 打包脚本，仅输出生成的 RootFS。"
+          echo "Error: 未找到 n1/mk_s905d_n1.sh 打包脚本！"
+          exit 1
         fi
 
         echo "最终 Release 输出目录："
