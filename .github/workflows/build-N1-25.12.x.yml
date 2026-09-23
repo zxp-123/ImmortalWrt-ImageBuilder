@@ -129,7 +129,7 @@ jobs:
           exit 1
         fi
 
-        # 1. 安全复制 packages 内容（避免空目录提示 cp 报错）
+        # 1. 安全复制 packages 内容
         cp -rf packages/* ib_dir/packages/ 2>/dev/null || true
         
         # 2. 注入配置
@@ -141,7 +141,7 @@ jobs:
           chmod -R +x ib_dir/shell/
         fi
 
-        # 4. 关键：建立旧 Docker 绝对路径软链接，兼容 build25.sh 中写死的 /home/build/immortalwrt 路径
+        # 4. 建立旧 Docker 绝对路径软链接，兼容 build25.sh 中写死的 /home/build/immortalwrt 路径
         sudo mkdir -p /home/build
         sudo ln -snf ${{ github.workspace }}/ib_dir /home/build/immortalwrt
         sudo chown -R $USER:$USER /home/build
@@ -161,8 +161,12 @@ jobs:
       run: |
         cd ib_dir
         
-        # 显式指定 PROFILE 变量（默认为 generic），防止 ImageBuilder 找不到设备型号
+        # 自动提取内核大版本（例如 6.6.93 提取为 6.6），防止 ImageBuilder 找不到 kernel-version.mk 哈希文件
+        KERNEL_PATCHVER=$(echo "${OPENWRT_KERNEL}" | cut -d. -f1,2)
+        echo "解析得到的 KERNEL_PATCHVER = ${KERNEL_PATCHVER}"
+        
         export PROFILE="${PROFILE:-generic}"
+        export KERNEL_PATCHVER="${KERNEL_PATCHVER}"
         
         bash ./build25.sh
 
