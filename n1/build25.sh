@@ -1,29 +1,48 @@
 #!/bin/bash
 
 # ==============================================================================
-# ImmortalWrt 25.12.x - Phicomm N1 (Final Complete Build Script)
+# ImmortalWrt 25.12.x - Phicomm N1 (Environment-Adaptive Build Script)
 # ==============================================================================
 
 set -e
 
-# 1. 智能寻找真正的 ImageBuilder 根目录
-BASE_DIR="/home/build/immortalwrt"
-if [ ! -f "$BASE_DIR/Makefile" ]; then
-    echo "⚠️ 检测到 $BASE_DIR 下缺少 Makefile，正在寻找真实解压目录..."
-    REAL_IB_DIR=$(find "$BASE_DIR" -maxdepth 2 -type f -name "Makefile" -exec dirname {} \; | head -n 1)
-    if [ -n "$REAL_IB_DIR" ] && [ -d "$REAL_IB_DIR" ]; then
-        echo "✅ 找到真实的 ImageBuilder 目录: $REAL_IB_DIR"
-        export IB_ROOT="$REAL_IB_DIR"
-    else
-        echo "❌ 错误: 无法在 $BASE_DIR 中找到包含 Makefile 的 ImageBuilder 目录！"
-        exit 1
-    fi
+# 1. 动态智能寻找 ImageBuilder 根目录（兼容本地 /home/build 及 GitHub Actions 任意工作目录）
+# 优先检查环境变量 IB_ROOT，其次检查当前目录，最后向下搜索包含 Makefile 的目录
+if [ -n "$IB_ROOT" ] && [ -f "$IB_ROOT/Makefile" ]; then
+    TARGET_DIR="$IB_ROOT"
+elif [ -f "$(pwd)/Makefile" ]; then
+    TARGET_DIR="$(pwd)"
 else
-    export IB_ROOT="$BASE_DIR"
+    # 尝试在常见的几个候选路径中寻找
+    for candidate in "/home/build/immortalwrt" "./ib_dir" "$(pwd)/ib_dir" "$(pwd)"; do
+        if [ -d "$candidate" ] && [ -f "$candidate/Makefile" ]; then
+            TARGET_DIR="$candidate"
+            break
+        fi
+    done
 fi
 
+# 如果还没找到，用 find 在当前目录及上级目录深度查找
+if [ -z "$TARGET_DIR" ] || [ ! -f "$TARGET_DIR/Makefile" ]; then
+    echo "⚠️ 未能直接定位 Makefile，正在全盘搜索 ImageBuilder 根目录..."
+    FOUND_MAKEFILE=$(find . -maxdepth 3 -name "Makefile" 2>/dev/null | head -n 1)
+    if [ -n "$FOUND_MAKEFILE" ]; then
+        TARGET_DIR="$(dirname "$(realpath "$FOUND_MAKEFILE")")"
+    else
+        # 终极兜底：检查 /home/runner 下的解压目录
+        RUNNER_IB=$(find /home/runner -maxdepth 4 -name "Makefile" 2>/dev/null | head -n 1 || true)
+        if [ -n "$RUNNER_IB" ]; then
+            TARGET_DIR="$(dirname "$RUNNER_IB")"
+        else
+            echo "❌ 错误: 无论在本地还是 CI 环境中，都找不到包含 Makefile 的 ImageBuilder 目录！"
+            exit 1
+        fi
+    fi
+fi
+
+export IB_ROOT="$(realpath "$TARGET_DIR")"
 cd "$IB_ROOT"
-echo "📂 当前工作目录已锁定为: $(pwd)"
+echo "📂 成功锁定 ImageBuilder 根目录: $(pwd)"
 
 # 2. 环境变量初始化
 export PROFILE="${PROFILE:-generic}"
@@ -158,7 +177,7 @@ else
     echo "⚪️ 未选择 luci-app-ssr-plus"
 fi
 
-# 14. 执行最终镜像编译（显式指定 TOPDIR="$IB_ROOT" 防止 target.mk 读取错误路径）
+# 14. 执行最终镜像编译（强制通过绝对路径传入 TOPDIR，确保 Makefile 能够被正常索引）
 echo "============================================================"
 echo "🚀 开始构建 ImmortalWrt 25.12.x N1 镜像..."
 echo "============================================================"
