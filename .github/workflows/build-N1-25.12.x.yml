@@ -63,7 +63,7 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y gettext kpartx util-linux e2fsprogs dosfstools zstd build-essential libncurses5-dev libncursesw5-dev gawk git subversion libssl-dev python3 unzip rsync device-tree-compiler pigz jq
         
-        # 关键修复：创建 /home/build 目录并赋予当前 runner 用户写权限
+        # 创建 /home/build 目录并赋予当前 runner 权限
         sudo mkdir -p /home/build
         sudo chown -R $USER:$USER /home/build
 
@@ -117,7 +117,7 @@ jobs:
           ./shell/apk-custom-packages.sh
         fi
 
-    - name: Prepare Build Files & Custom Scripts
+    - name: Prepare Build Files & Compatibility Links
       run: |
         mkdir -p out packages
         if [ ! -f "${{ env.CONFIG_FILE }}" ]; then
@@ -129,17 +129,24 @@ jobs:
           exit 1
         fi
 
-        # 1. 注入配置与 packages 到 ImageBuilder 目录
-        cp -f ${{ env.CONFIG_FILE }} ib_dir/.config
-        cp -rf packages/* ib_dir/packages/ || true
+        # 1. 安全复制 packages 内容（避免空目录提示 cp 报错）
+        cp -rf packages/* ib_dir/packages/ 2>/dev/null || true
         
-        # 2. 同步将 shell 脚本文件夹拷贝进 ImageBuilder 目录
+        # 2. 注入配置
+        cp -f ${{ env.CONFIG_FILE }} ib_dir/.config
+        
+        # 3. 复制 shell 目录
         if [ -d "shell" ]; then
           cp -rf shell ib_dir/
           chmod -R +x ib_dir/shell/
         fi
 
-        # 3. 复制 build25.sh 到 ImageBuilder 目录
+        # 4. 关键：建立旧 Docker 绝对路径软链接，兼容 build25.sh 中写死的 /home/build/immortalwrt 路径
+        sudo mkdir -p /home/build
+        sudo ln -snf ${{ github.workspace }}/ib_dir /home/build/immortalwrt
+        sudo chown -R $USER:$USER /home/build
+
+        # 5. 给 build25.sh 添加权限并复制
         chmod +x ${{ env.BUILD_SCRIPT }}
         cp -f ${{ env.BUILD_SCRIPT }} ib_dir/build25.sh
 
@@ -150,8 +157,13 @@ jobs:
         INCLUDE_DOCKER: ${{ github.event.inputs.include_docker }}
         ROOTFS_SIZE: ${{ github.event.inputs.rootfs_size }}
         ENABLE_APP_STORE: ${{ github.event.inputs.enable_app_store }}
+        PROFILE: "generic"
       run: |
         cd ib_dir
+        
+        # 显式指定 PROFILE 变量（默认为 generic），防止 ImageBuilder 找不到设备型号
+        export PROFILE="${PROFILE:-generic}"
+        
         bash ./build25.sh
 
         mkdir -p ../out
