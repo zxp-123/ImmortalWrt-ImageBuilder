@@ -1,9 +1,10 @@
-name: Build 25.12.x N1
+name: Build 25.12.x N1 (Native ImageBuilder)
+
 on:
   workflow_dispatch:
     inputs:
       luci_version:
-        description: "选择luci/固件版本"
+        description: "选择 ImmortalWrt 版本"
         required: false
         default: "25.12.2"
         type: choice
@@ -22,125 +23,12 @@ on:
           - 5.10.235
           - 5.15.189
           - 6.1.121
-          - 6.1.122
-          - 6.1.123
-          - 6.1.124
-          - 6.1.126
-          - 6.1.127
-          - 6.1.128
-          - 6.1.129
           - 6.1.130
-          - 6.1.131
-          - 6.1.132
-          - 6.1.133
-          - 6.1.134
-          - 6.1.135
-          - 6.1.136
-          - 6.1.138
-          - 6.1.139
-          - 6.1.140
-          - 6.1.141
-          - 6.1.142
-          - 6.1.144
-          - 6.1.146
-          - 6.1.147
-          - 6.1.148
-          - 6.1.149
-          - 6.1.150
-          - 6.1.151
-          - 6.1.152
-          - 6.1.153
-          - 6.1.154
-          - 6.1.155
-          - 6.1.156
-          - 6.1.157
-          - 6.1.158
-          - 6.1.159
-          - 6.1.160
           - 6.6.67
-          - 6.6.68
-          - 6.6.69
-          - 6.6.70
-          - 6.6.71
-          - 6.6.72
-          - 6.6.74
-          - 6.6.76
-          - 6.6.79
           - 6.6.80
-          - 6.6.81
-          - 6.6.83
-          - 6.6.84
-          - 6.6.85
-          - 6.6.86
-          - 6.6.87
-          - 6.6.88
-          - 6.6.89
-          - 6.6.90
-          - 6.6.91
-          - 6.6.92
           - 6.6.93
-          - 6.6.94
-          - 6.6.95
-          - 6.6.97
-          - 6.6.99
-          - 6.6.100
-          - 6.6.101
-          - 6.6.102
-          - 6.6.103
-          - 6.6.104
-          - 6.6.105
-          - 6.6.107
-          - 6.6.108
-          - 6.6.109
-          - 6.6.110
-          - 6.6.111
-          - 6.6.112
-          - 6.6.113
-          - 6.6.114
-          - 6.6.115
-          - 6.6.116
-          - 6.6.119
-          - 6.6.120
           - 6.12.16
-          - 6.12.17
-          - 6.12.18
-          - 6.12.19
-          - 6.12.20
-          - 6.12.21
-          - 6.12.22
-          - 6.12.23
-          - 6.12.24
-          - 6.12.25
-          - 6.12.26
-          - 6.12.28
-          - 6.12.29
-          - 6.12.30
-          - 6.12.31
-          - 6.12.32
-          - 6.12.33
-          - 6.12.34
-          - 6.12.35
-          - 6.12.37
-          - 6.12.39
           - 6.12.40
-          - 6.12.41                    
-          - 6.12.42
-          - 6.12.43
-          - 6.12.44
-          - 6.12.45
-          - 6.12.46
-          - 6.12.48
-          - 6.12.49
-          - 6.12.50
-          - 6.12.51
-          - 6.12.52
-          - 6.12.53
-          - 6.12.54
-          - 6.12.55
-          - 6.12.56
-          - 6.12.57
-          - 6.12.62
-          - 6.12.65
       include_docker:
         description: "是否安装 Docker"
         required: false
@@ -167,35 +55,67 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout
+    - name: Checkout Repository
       uses: actions/checkout@v4
 
-    - name: Initialization environment
+    - name: Initialization Environment
       run: |
         sudo apt-get update
-        sudo apt-get install -y gettext kpartx util-linux e2fsprogs dosfstools
+        sudo apt-get install -y gettext kpartx util-linux e2fsprogs dosfstools zstd build-essential libncurses5-dev libncursesw5-dev gawk git subversion libssl-dev python3 unzip rsync device-tree-compiler
 
-    - name: Pre-download APK Packages
+    - name: Download & Extract ImmortalWrt ImageBuilder Tarball
+      run: |
+        VERSION="${{ github.event.inputs.luci_version }}"
+        echo "正在从官方 Downloads 站获取 ImageBuilder: ${VERSION} ..."
+        
+        # 匹配压缩包 (支持 .tar.zst 或 .tar.xz)
+        BASE_URL="https://downloads.immortalwrt.org/releases/${VERSION}/targets/armsr/armv8"
+        
+        mkdir -p ib_dir
+        cd ib_dir
+        
+        # 优先寻找 zstd 压缩包，找不到则尝试 xz
+        if curl -sI "${BASE_URL}/immortalwrt-imagebuilder-${VERSION}-armsr-armv8.Linux-x86_64.tar.zst" | grep -q "200 OK"; then
+          TAR_FILE="immortalwrt-imagebuilder-${VERSION}-armsr-armv8.Linux-x86_64.tar.zst"
+          curl -sSL "${BASE_URL}/${TAR_FILE}" -o "${TAR_FILE}"
+          tar -I zstd -xf "${TAR_FILE}" --strip-components=1
+        elif curl -sI "${BASE_URL}/immortalwrt-imagebuilder-${VERSION}-armsr-armv8.Linux-x86_64.tar.xz" | grep -q "200 OK"; then
+          TAR_FILE="immortalwrt-imagebuilder-${VERSION}-armsr-armv8.Linux-x86_64.tar.xz"
+          curl -sSL "${BASE_URL}/${TAR_FILE}" -o "${TAR_FILE}"
+          tar -xf "${TAR_FILE}" --strip-components=1
+        else
+          echo "Error: 无法在官方下载站找到 ${VERSION} 的 ImageBuilder 压缩包！"
+          exit 1
+        fi
+        
+        echo "ImageBuilder 解压完成！"
+        ls -la
+
+    - name: Pre-download APK / OPKG Custom Packages
       run: |
         chmod +x shell/apk-custom-packages.sh || true
         if [ -f "shell/apk-custom-packages.sh" ]; then
           ./shell/apk-custom-packages.sh
         fi
 
-    - name: Check essential build files
+    - name: Prepare Config and Custom Scripts
       run: |
         mkdir -p out packages
         if [ ! -f "${{ env.CONFIG_FILE }}" ]; then
-          echo "Error: Config file ${{ env.CONFIG_FILE }} does not exist!"
+          echo "Error: Config file ${{ env.CONFIG_FILE }} 不存在！"
           exit 1
         fi
         if [ ! -f "${{ env.BUILD_SCRIPT }}" ]; then
-          echo "Error: Build script ${{ env.BUILD_SCRIPT }} does not exist!"
+          echo "Error: Build script ${{ env.BUILD_SCRIPT }} 不存在！"
           exit 1
         fi
+        
+        # 将配置与包拷贝到解压好的 ImageBuilder 目录中
+        cp -f ${{ env.CONFIG_FILE }} ib_dir/.config
+        cp -rf packages/* ib_dir/packages/ || true
         chmod +x ${{ env.BUILD_SCRIPT }}
 
-    - name: Run ImageBuilder
+    - name: Build Firmware RootFS via ImageBuilder
       env:
         LUCI_VERSION: ${{ github.event.inputs.luci_version }}
         OPENWRT_KERNEL: ${{ github.event.inputs.openwrt_kernel }}
@@ -203,21 +123,30 @@ jobs:
         ROOTFS_SIZE: ${{ github.event.inputs.rootfs_size }}
         ENABLE_APP_STORE: ${{ github.event.inputs.enable_app_store }}
       run: |
-        docker run --rm --privileged \
-          -e LUCI_VERSION="${LUCI_VERSION}" \
-          -e OPENWRT_KERNEL="${OPENWRT_KERNEL}" \
-          -e INCLUDE_DOCKER="${INCLUDE_DOCKER}" \
-          -e ROOTFS_SIZE="${ROOTFS_SIZE}" \
-          -e ENABLE_APP_STORE="${ENABLE_APP_STORE}" \
-          -v ${{ github.workspace }}/out:/home/build/immortalwrt/bin \
-          -v ${{ github.workspace }}/${{ env.CONFIG_FILE }}:/home/build/immortalwrt/.config \
-          -v ${{ github.workspace }}/${{ env.BUILD_SCRIPT }}:/home/build/immortalwrt/build25.sh \
-          -v ${{ github.workspace }}/packages:/home/build/immortalwrt/packages \
-          -w /home/build/immortalwrt \
-          immortalwrt/imagebuilder:armsr-armv8-${LUCI_VERSION} \
-          /bin/bash /home/build/immortalwrt/build25.sh
+        cd ib_dir
+        
+        # 执行 build25.sh 生成 rootfs (在宿主机原生环境下编译)
+        bash ../${{ env.BUILD_SCRIPT }}
+        
+        # 复制生成好的 rootfs 或 bin 文件到 out 目录
+        cp -rf bin/targets/armsr/armv8/* ../out/ || true
 
-    - name: Upload firmware to release
+    - name: Pack N1 S905D .img Firmware (via mk_s905d_n1.sh)
+      if: success()
+      run: |
+        # 如果项目根目录或 n1/ 目录下有打包脚本 (mk_s905d_n1.sh 或类似打包脚本)
+        if [ -f "n1/mk_s905d_n1.sh" ]; then
+          chmod +x n1/mk_s905d_n1.sh
+          cd n1
+          sudo ./mk_s905d_n1.sh
+          cd ..
+          cp -rf n1/out/*.img out/ || cp -rf n1/output/*.img out/ || true
+        fi
+        
+        echo "最终打包完成的文件内容："
+        ls -lh out/
+
+    - name: Upload Firmware to GitHub Release
       uses: softprops/action-gh-release@v1
       if: success()
       with:
