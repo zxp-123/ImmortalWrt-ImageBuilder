@@ -62,6 +62,10 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y gettext kpartx util-linux e2fsprogs dosfstools zstd build-essential libncurses5-dev libncursesw5-dev gawk git subversion libssl-dev python3 unzip rsync device-tree-compiler pigz jq
+        
+        # 关键修复：创建 /home/build 目录并赋予当前 runner 用户写权限
+        sudo mkdir -p /home/build
+        sudo chown -R $USER:$USER /home/build
 
     - name: Download & Extract 25.12.x ArmsR ImageBuilder
       run: |
@@ -129,13 +133,13 @@ jobs:
         cp -f ${{ env.CONFIG_FILE }} ib_dir/.config
         cp -rf packages/* ib_dir/packages/ || true
         
-        # 2. 关键修复：同步将项目根目录下的 shell 脚本文件夹拷贝进 ImageBuilder 目录，解决相对路径找不到问题
+        # 2. 同步将 shell 脚本文件夹拷贝进 ImageBuilder 目录
         if [ -d "shell" ]; then
           cp -rf shell ib_dir/
           chmod -R +x ib_dir/shell/
         fi
 
-        # 3. 给 build25.sh 添加可执行权限并复制到 ImageBuilder 内部
+        # 3. 复制 build25.sh 到 ImageBuilder 目录
         chmod +x ${{ env.BUILD_SCRIPT }}
         cp -f ${{ env.BUILD_SCRIPT }} ib_dir/build25.sh
 
@@ -148,10 +152,8 @@ jobs:
         ENABLE_APP_STORE: ${{ github.event.inputs.enable_app_store }}
       run: |
         cd ib_dir
-        # 在 ImageBuilder 根目录下直接运行内部拷贝的 build25.sh
         bash ./build25.sh
 
-        # 收集生成的 rootfs 压缩包到 out 目录
         mkdir -p ../out
         find bin/targets/armsr/armv8/ -name "*rootfs*.tar.gz" -exec cp -f {} ../out/ \; || true
         find bin/targets/armsr/armv8/ -name "*.img.gz" -exec cp -f {} ../out/ \; || true
