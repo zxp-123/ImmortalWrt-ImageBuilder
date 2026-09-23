@@ -11,6 +11,14 @@
 
 set -e
 
+# ==============================================================================
+# 0. 自动对齐 KERNEL_PATCHVER 与 PROFILE（修复 ImageBuilder 内核匹配报错的关键）
+# ==============================================================================
+if [ -z "${KERNEL_PATCHVER}" ] && [ -n "${OPENWRT_KERNEL}" ]; then
+    export KERNEL_PATCHVER=$(echo "${OPENWRT_KERNEL}" | cut -d. -f1,2)
+fi
+export PROFILE="${PROFILE:-generic}"
+
 ###############################################################################
 # 1. 25.12.x APK package selection
 ###############################################################################
@@ -28,6 +36,7 @@ echo "Starting N1 25.12 build at $(date)" >> "$LOGFILE"
 
 echo "Building for profile: $PROFILE"
 echo "Building for ROOTFS_PARTSIZE: $ROOTFS_PARTSIZE"
+echo "Building for KERNEL_PATCHVER: $KERNEL_PATCHVER"
 
 ###############################################################################
 # 3. Base packages
@@ -262,8 +271,8 @@ fi
 
 echo "============================================================"
 echo "开始构建 ImmortalWrt 25.12.x N1"
-echo "PROFILE          = $PROFILE"
-echo "ROOTFS_PARTSIZE  = $ROOTFS_PARTSIZE"
+echo "PROFILE         = $PROFILE"
+echo "ROOTFS_PARTSIZE = $ROOTFS_PARTSIZE"
 echo "============================================================"
 
 make image \
