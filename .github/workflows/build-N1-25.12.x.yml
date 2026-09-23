@@ -73,7 +73,6 @@ jobs:
         mkdir -p ib_dir
         cd ib_dir
 
-        # 针对 25.12.x (APK 架构)，优先访问 snapshots/releases 的 armsr/armv8 路径
         URL_PATHS=(
           "https://downloads.immortalwrt.org/snapshots/targets/armsr/armv8"
           "https://downloads.immortalwrt.org/releases/${VERSION}/targets/armsr/armv8"
@@ -109,7 +108,7 @@ jobs:
 
     - name: Pre-download Custom APK Packages
       run: |
-        chmod +x shell/apk-custom-packages.sh || true
+        chmod -R +x shell/ || true
         if [ -f "shell/apk-custom-packages.sh" ]; then
           ./shell/apk-custom-packages.sh
         fi
@@ -126,10 +125,19 @@ jobs:
           exit 1
         fi
 
-        # 注入配置与预先下载好的 packages 到 ImageBuilder 目录
+        # 1. 注入配置与 packages 到 ImageBuilder 目录
         cp -f ${{ env.CONFIG_FILE }} ib_dir/.config
         cp -rf packages/* ib_dir/packages/ || true
+        
+        # 2. 关键修复：同步将项目根目录下的 shell 脚本文件夹拷贝进 ImageBuilder 目录，解决相对路径找不到问题
+        if [ -d "shell" ]; then
+          cp -rf shell ib_dir/
+          chmod -R +x ib_dir/shell/
+        fi
+
+        # 3. 给 build25.sh 添加可执行权限并复制到 ImageBuilder 内部
         chmod +x ${{ env.BUILD_SCRIPT }}
+        cp -f ${{ env.BUILD_SCRIPT }} ib_dir/build25.sh
 
     - name: Build 25.12.x RootFS (Native Execution)
       env:
@@ -140,8 +148,8 @@ jobs:
         ENABLE_APP_STORE: ${{ github.event.inputs.enable_app_store }}
       run: |
         cd ib_dir
-        # 直接在宿主机调用 build25.sh 生成 25.12.x 的 rootfs.tar.gz
-        bash ../${{ env.BUILD_SCRIPT }}
+        # 在 ImageBuilder 根目录下直接运行内部拷贝的 build25.sh
+        bash ./build25.sh
 
         # 收集生成的 rootfs 压缩包到 out 目录
         mkdir -p ../out
@@ -153,7 +161,6 @@ jobs:
         OPENWRT_KERNEL: ${{ github.event.inputs.openwrt_kernel }}
         ROOTFS_SIZE: ${{ github.event.inputs.rootfs_size }}
       run: |
-        # 寻找神佬仓库样式的 mk_s905d_n1.sh 脚本
         PACK_SCRIPT=""
         if [ -f "n1/mk_s905d_n1.sh" ]; then
           PACK_SCRIPT="n1/mk_s905d_n1.sh"
@@ -168,13 +175,11 @@ jobs:
           
           chmod +x ${PACK_SCRIPT}
           
-          # 找到刚刚编译出来的 25.12.x rootfs 压缩包
           ROOTFS_TAR=$(find out/ -name "*rootfs*.tar.gz" | head -n 1)
           
           if [ -f "${ROOTFS_TAR}" ]; then
             echo "使用生成的 25.12.x rootfs: ${ROOTFS_TAR}"
             
-            # 将生成的 rootfs 传入打包环境
             WORK_DIR=$(dirname ${PACK_SCRIPT})
             cp -f ${ROOTFS_TAR} ${WORK_DIR}/openwrt-armsr-armv8-rootfs.tar.gz || true
             
@@ -182,7 +187,6 @@ jobs:
             sudo ./$(basename ${PACK_SCRIPT})
             cd -
             
-            # 收集最终生成的 N1 .img 固件
             find ${WORK_DIR} -maxdepth 2 -name "*.img*" -exec cp -f {} out/ \; || true
           fi
         else
