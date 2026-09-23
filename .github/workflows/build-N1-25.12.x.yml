@@ -1,20 +1,20 @@
-name: Build 25.12.x N1 (Native ImageBuilder)
+name: Build 25.12.x N1 (God-Org / Flippy PackIt Mode)
 
 on:
   workflow_dispatch:
     inputs:
       luci_version:
-        description: "选择 ImmortalWrt 版本"
+        description: "选择 ImmortalWrt 25.12.x 版本"
         required: false
-        default: "25.12.2"
+        default: "25.12"
         type: choice
         options:
-          - 25.12.2
-          - 25.12.1
-          - 25.12.0
-          - 25.12
+          - "25.12"
+          - "25.12.2"
+          - "25.12.1"
+          - "25.12.0"
       openwrt_kernel:
-        description: "选择构建的内核(斐讯N1)"
+        description: "选择构建的内核(斐讯N1 S905D)"
         required: false
         default: "6.6.93"
         type: choice
@@ -46,7 +46,7 @@ on:
         type: boolean
 
 env:
-  TAG_NAME: n1
+  TAG_NAME: n1-25.12
   CONFIG_FILE: n1/imm25.config
   BUILD_SCRIPT: n1/build25.sh
 
@@ -58,64 +58,80 @@ jobs:
     - name: Checkout Repository
       uses: actions/checkout@v4
 
-    - name: Initialization Environment
+    - name: Initialization Host Environment
       run: |
         sudo apt-get update
-        sudo apt-get install -y gettext kpartx util-linux e2fsprogs dosfstools zstd build-essential libncurses5-dev libncursesw5-dev gawk git subversion libssl-dev python3 unzip rsync device-tree-compiler
+        sudo apt-get install -y gettext kpartx util-linux e2fsprogs dosfstools zstd build-essential libncurses5-dev libncursesw5-dev gawk git subversion libssl-dev python3 unzip rsync device-tree-compiler pigz jq
 
-    - name: Download & Extract ImmortalWrt ImageBuilder Tarball
+    - name: Download & Extract 25.12.x ArmsR ImageBuilder
       run: |
         VERSION="${{ github.event.inputs.luci_version }}"
-        echo "正在从官方 Downloads 站获取 ImageBuilder: ${VERSION} ..."
-        
-        # 匹配压缩包 (支持 .tar.zst 或 .tar.xz)
-        BASE_URL="https://downloads.immortalwrt.org/releases/${VERSION}/targets/armsr/armv8"
+        echo "=========================================="
+        echo "开始获取 ImmortalWrt 25.12.x ImageBuilder"
+        echo "=========================================="
         
         mkdir -p ib_dir
         cd ib_dir
-        
-        # 优先寻找 zstd 压缩包，找不到则尝试 xz
-        if curl -sI "${BASE_URL}/immortalwrt-imagebuilder-${VERSION}-armsr-armv8.Linux-x86_64.tar.zst" | grep -q "200 OK"; then
-          TAR_FILE="immortalwrt-imagebuilder-${VERSION}-armsr-armv8.Linux-x86_64.tar.zst"
-          curl -sSL "${BASE_URL}/${TAR_FILE}" -o "${TAR_FILE}"
-          tar -I zstd -xf "${TAR_FILE}" --strip-components=1
-        elif curl -sI "${BASE_URL}/immortalwrt-imagebuilder-${VERSION}-armsr-armv8.Linux-x86_64.tar.xz" | grep -q "200 OK"; then
-          TAR_FILE="immortalwrt-imagebuilder-${VERSION}-armsr-armv8.Linux-x86_64.tar.xz"
-          curl -sSL "${BASE_URL}/${TAR_FILE}" -o "${TAR_FILE}"
-          tar -xf "${TAR_FILE}" --strip-components=1
-        else
-          echo "Error: 无法在官方下载站找到 ${VERSION} 的 ImageBuilder 压缩包！"
+
+        # 针对 25.12.x (APK 架构)，优先访问 snapshots/releases 的 armsr/armv8 路径
+        URL_PATHS=(
+          "https://downloads.immortalwrt.org/snapshots/targets/armsr/armv8"
+          "https://downloads.immortalwrt.org/releases/${VERSION}/targets/armsr/armv8"
+        )
+
+        FOUND=0
+        for BASE_URL in "${URL_PATHS[@]}"; do
+          echo "正在尝试下载源: ${BASE_URL}"
+          FILE_LIST=$(curl -sSL "${BASE_URL}/" || true)
+          TAR_FILE=$(echo "${FILE_LIST}" | grep -oE 'immortalwrt-imagebuilder-[^"]+\.tar\.(zst|xz)' | head -n 1 || true)
+
+          if [ -n "${TAR_FILE}" ]; then
+            echo "找到匹配的 25.12.x ImageBuilder 文件: ${TAR_FILE}"
+            curl -sSL "${BASE_URL}/${TAR_FILE}" -o "${TAR_FILE}"
+
+            if [[ "${TAR_FILE}" == *.zst ]]; then
+              tar -I zstd -xf "${TAR_FILE}" --strip-components=1
+            else
+              tar -xf "${TAR_FILE}" --strip-components=1
+            fi
+            FOUND=1
+            break
+          fi
+        done
+
+        if [ ${FOUND} -ne 1 ]; then
+          echo "Error: 未能在官方下载站检索到 25.12.x 的 ImageBuilder 包！"
           exit 1
         fi
-        
-        echo "ImageBuilder 解压完成！"
+
+        echo "ImageBuilder 解压完成："
         ls -la
 
-    - name: Pre-download APK / OPKG Custom Packages
+    - name: Pre-download Custom APK Packages
       run: |
         chmod +x shell/apk-custom-packages.sh || true
         if [ -f "shell/apk-custom-packages.sh" ]; then
           ./shell/apk-custom-packages.sh
         fi
 
-    - name: Prepare Config and Custom Scripts
+    - name: Prepare Build Files & Custom Scripts
       run: |
         mkdir -p out packages
         if [ ! -f "${{ env.CONFIG_FILE }}" ]; then
-          echo "Error: Config file ${{ env.CONFIG_FILE }} 不存在！"
+          echo "Error: 配置文件 ${{ env.CONFIG_FILE }} 不存在！"
           exit 1
         fi
         if [ ! -f "${{ env.BUILD_SCRIPT }}" ]; then
-          echo "Error: Build script ${{ env.BUILD_SCRIPT }} 不存在！"
+          echo "Error: 构建脚本 ${{ env.BUILD_SCRIPT }} 不存在！"
           exit 1
         fi
-        
-        # 将配置与包拷贝到解压好的 ImageBuilder 目录中
+
+        # 注入配置与预先下载好的 packages 到 ImageBuilder 目录
         cp -f ${{ env.CONFIG_FILE }} ib_dir/.config
         cp -rf packages/* ib_dir/packages/ || true
         chmod +x ${{ env.BUILD_SCRIPT }}
 
-    - name: Build Firmware RootFS via ImageBuilder
+    - name: Build 25.12.x RootFS (Native Execution)
       env:
         LUCI_VERSION: ${{ github.event.inputs.luci_version }}
         OPENWRT_KERNEL: ${{ github.event.inputs.openwrt_kernel }}
@@ -124,29 +140,59 @@ jobs:
         ENABLE_APP_STORE: ${{ github.event.inputs.enable_app_store }}
       run: |
         cd ib_dir
-        
-        # 执行 build25.sh 生成 rootfs (在宿主机原生环境下编译)
+        # 直接在宿主机调用 build25.sh 生成 25.12.x 的 rootfs.tar.gz
         bash ../${{ env.BUILD_SCRIPT }}
-        
-        # 复制生成好的 rootfs 或 bin 文件到 out 目录
-        cp -rf bin/targets/armsr/armv8/* ../out/ || true
 
-    - name: Pack N1 S905D .img Firmware (via mk_s905d_n1.sh)
-      if: success()
+        # 收集生成的 rootfs 压缩包到 out 目录
+        mkdir -p ../out
+        find bin/targets/armsr/armv8/ -name "*rootfs*.tar.gz" -exec cp -f {} ../out/ \; || true
+        find bin/targets/armsr/armv8/ -name "*.img.gz" -exec cp -f {} ../out/ \; || true
+
+    - name: Package Phicomm N1 S905D (.img) Firmware
+      env:
+        OPENWRT_KERNEL: ${{ github.event.inputs.openwrt_kernel }}
+        ROOTFS_SIZE: ${{ github.event.inputs.rootfs_size }}
       run: |
-        # 如果项目根目录或 n1/ 目录下有打包脚本 (mk_s905d_n1.sh 或类似打包脚本)
+        # 寻找神佬仓库样式的 mk_s905d_n1.sh 脚本
+        PACK_SCRIPT=""
         if [ -f "n1/mk_s905d_n1.sh" ]; then
-          chmod +x n1/mk_s905d_n1.sh
-          cd n1
-          sudo ./mk_s905d_n1.sh
-          cd ..
-          cp -rf n1/out/*.img out/ || cp -rf n1/output/*.img out/ || true
+          PACK_SCRIPT="n1/mk_s905d_n1.sh"
+        elif [ -f "mk_s905d_n1.sh" ]; then
+          PACK_SCRIPT="mk_s905d_n1.sh"
         fi
-        
-        echo "最终打包完成的文件内容："
+
+        if [ -n "${PACK_SCRIPT}" ]; then
+          echo "=========================================="
+          echo "找到打包脚本: ${PACK_SCRIPT}，开始生成 N1 S905D .img 镜像"
+          echo "=========================================="
+          
+          chmod +x ${PACK_SCRIPT}
+          
+          # 找到刚刚编译出来的 25.12.x rootfs 压缩包
+          ROOTFS_TAR=$(find out/ -name "*rootfs*.tar.gz" | head -n 1)
+          
+          if [ -f "${ROOTFS_TAR}" ]; then
+            echo "使用生成的 25.12.x rootfs: ${ROOTFS_TAR}"
+            
+            # 将生成的 rootfs 传入打包环境
+            WORK_DIR=$(dirname ${PACK_SCRIPT})
+            cp -f ${ROOTFS_TAR} ${WORK_DIR}/openwrt-armsr-armv8-rootfs.tar.gz || true
+            
+            cd ${WORK_DIR}
+            sudo ./$(basename ${PACK_SCRIPT})
+            cd -
+            
+            # 收集最终生成的 N1 .img 固件
+            find ${WORK_DIR} -maxdepth 2 -name "*.img*" -exec cp -f {} out/ \; || true
+          fi
+        else
+          echo "未找到 mk_s905d_n1.sh 打包脚本，仅输出生成的 RootFS。"
+        fi
+
+        echo "最终 Release 输出目录："
         ls -lh out/
 
-    - name: Upload Firmware to GitHub Release
+    - name: Upload N1 25.12.x Firmware to Release
       uses: softprops/action-gh-release@v1
       if: success()
       with:
