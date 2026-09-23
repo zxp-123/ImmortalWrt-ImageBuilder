@@ -262,6 +262,26 @@ else
 fi
 
 ###############################################################################
+# 11.5 自动修复 ImageBuilder 缺少 kernel-<version> 文件的兼容逻辑
+###############################################################################
+echo "🛠️ 正在检查并修复内核版本映射文件..."
+if [ -d "target/linux/generic" ]; then
+    cd target/linux/generic
+    if [ ! -f "kernel-${KERNEL_PATCHVER}" ]; then
+        FOUND_KERNEL_FILE=$(ls kernel-${KERNEL_PATCHVER}.* 2>/dev/null | head -n 1 || true)
+        if [ -n "${FOUND_KERNEL_FILE}" ]; then
+            echo "找到匹配的内核文件: ${FOUND_KERNEL_FILE}，正在为 ${KERNEL_PATCHVER} 建立软链接..."
+            ln -sf "${FOUND_KERNEL_FILE}" "kernel-${KERNEL_PATCHVER}"
+        else
+            echo "LINUX_VERSION=${OPENWRT_KERNEL}" > "kernel-${KERNEL_PATCHVER}"
+            echo "LINUX_KERNEL_HASH=x" >> "kernel-${KERNEL_PATCHVER}"
+            echo "⚠️ 已自动生成 kernel-${KERNEL_PATCHVER} 占位文件"
+        fi
+    fi
+    cd - > /dev/null
+fi
+
+###############################################################################
 # 12. Build N1 image
 #
 # PROFILE / ROOTFS_PARTSIZE 继续由 GitHub Actions 提供。
@@ -273,6 +293,7 @@ echo "============================================================"
 echo "开始构建 ImmortalWrt 25.12.x N1"
 echo "PROFILE         = $PROFILE"
 echo "ROOTFS_PARTSIZE = $ROOTFS_PARTSIZE"
+echo "KERNEL_PATCHVER = $KERNEL_PATCHVER"
 echo "============================================================"
 
 make image \
