@@ -1,107 +1,281 @@
 #!/bin/bash
-# Log file for debugging
-source shell/custom-packages.sh
-source shell/switch_repository.sh
-echo "第三方软件包: $CUSTOM_PACKAGES"
+
+# ImmortalWrt 25.12.x - Phicomm N1
+# Based on the existing N1 24.x build logic.
+#
+# 重要原则：
+#   - N1 硬件相关逻辑沿用 24.x
+#   - BCM43455 / Amlogic 相关包保持不变
+#   - 仅将 24.x 的 IPK 第三方包流程切换为 25.12 APK 流程
+#   - PROFILE / ROOTFS_PARTSIZE / INCLUDE_DOCKER 等继续由 GitHub Actions 传入
+
+set -e
+
+###############################################################################
+# 1. 25.12.x APK package selection
+###############################################################################
+
+source shell/apk-custom-packages.sh
+
+echo "第三方 APK 软件包: $CUSTOM_PACKAGES"
+
 LOGFILE="/tmp/uci-defaults-log.txt"
-echo "Starting 99-custom.sh at $(date)" >> $LOGFILE
-# yml 传入的路由器型号 PROFILE
+echo "Starting N1 25.12 build at $(date)" >> "$LOGFILE"
+
+###############################################################################
+# 2. GitHub Actions parameters
+###############################################################################
+
 echo "Building for profile: $PROFILE"
-# yml 传入的固件大小 ROOTFS_PARTSIZE
 echo "Building for ROOTFS_PARTSIZE: $ROOTFS_PARTSIZE"
-# 输出调试信息
-echo "$(date '+%Y-%m-%d %H:%M:%S') - 开始构建arm64的rootfs.tar.gz"
-# 定义所需安装的包列表 下列插件你都可以自行删减
+
+###############################################################################
+# 3. Base packages
+#
+# 保留 N1 24.x 原有包列表。
+###############################################################################
+
 PACKAGES=""
+
 PACKAGES="$PACKAGES curl fdisk"
+
 PACKAGES="$PACKAGES luci-i18n-diskman-zh-cn"
 PACKAGES="$PACKAGES luci-i18n-package-manager-zh-cn"
 PACKAGES="$PACKAGES luci-i18n-firewall-zh-cn"
-# 服务——FileBrowser 用户名admin 密码admin
+
+# FileBrowser
 PACKAGES="$PACKAGES luci-i18n-filebrowser-go-zh-cn"
+
+# Argon
 PACKAGES="$PACKAGES luci-theme-argon"
 PACKAGES="$PACKAGES luci-app-argon-config"
 PACKAGES="$PACKAGES luci-i18n-argon-config-zh-cn"
+
+# ttyd
 PACKAGES="$PACKAGES luci-i18n-ttyd-zh-cn"
+
+# SSH SFTP
 PACKAGES="$PACKAGES openssh-sftp-server"
+
 # 文件管理器
 PACKAGES="$PACKAGES luci-i18n-filemanager-zh-cn"
-# 判断是否需要编译 Docker 插件
+
+###############################################################################
+# 4. Docker
+#
+# 保留原 N1 Actions 的 INCLUDE_DOCKER 机制。
+###############################################################################
+
 if [ "$INCLUDE_DOCKER" = "yes" ]; then
     PACKAGES="$PACKAGES luci-i18n-dockerman-zh-cn"
-    echo "✅ 已选择docker : luci-i18n-dockerman-zh-cn"
+    echo "✅ 已选择 Docker: luci-i18n-dockerman-zh-cn"
 fi
-# 斐讯N1 无线
+
+###############################################################################
+# 5. Phicomm N1 WiFi
+#
+# 这一部分不要因为升级 25.12 而删除。
+#
+# N1 = BCM43455。
+# 24.x 已经验证的驱动/用户空间组件继续保留。
+###############################################################################
+
 PACKAGES="$PACKAGES kmod-brcmfmac wpad-basic-mbedtls iw iwinfo"
+
 PACKAGES="$PACKAGES perlbase-base perlbase-file perlbase-time perlbase-utf8 perlbase-xsloader"
-# 晶晨宝盒（追加第三方必备软件 用于写入emmc 请不要注释）
+
+###############################################################################
+# 6. Amlogic / N1
+#
+# 晶晨宝盒是 N1 方案的重要组成部分，继续保留。
+###############################################################################
+
 CUSTOM_PACKAGES="$CUSTOM_PACKAGES luci-app-amlogic luci-i18n-amlogic-zh-cn"
 
-echo "🔄 正在同步第三方软件仓库 Cloning run file repo..."
-git clone --depth=1 https://github.com/wukongdaily/store.git /tmp/store-run-repo
-# 拷贝 run/arm64 下所有 run 文件和ipk文件 到 extra-packages 目录
-mkdir -p /home/build/immortalwrt/extra-packages
-cp -r /tmp/store-run-repo/run/arm64/* /home/build/immortalwrt/extra-packages/
-echo "✅ Run files copied to extra-packages:"
-ls -lh /home/build/immortalwrt/extra-packages/*.run
-# 解压并拷贝ipk到packages目录
-sh shell/prepare-packages.sh
-ls -lah /home/build/immortalwrt/packages/
-# 添加架构优先级信息
-sed -i '1i\
-arch aarch64_generic 10\n\
-arch aarch64_cortex-a53 15' repositories.conf
+###############################################################################
+# 7. Third-party APK repository
+#
+# 24.x:
+#   wukongdaily/store.git
+#   prepare-packages.sh
+#
+# 25.12:
+#   wukongdaily/apk.git
+#   apk-prepare-packages.sh
+###############################################################################
 
-# ======== shell/custom-packages.sh =======
-# 合并imm仓库以外的第三方插件
+if [ -z "$CUSTOM_PACKAGES" ]; then
+
+    echo "⚪️ 未选择任何第三方 APK 软件包"
+
+else
+
+    echo "🔄 正在同步第三方 APK 软件仓库..."
+
+    rm -rf /tmp/store-apk-repo
+
+    git clone \
+        --depth=1 \
+        https://github.com/wukongdaily/apk.git \
+        /tmp/store-apk-repo
+
+    mkdir -p /home/build/immortalwrt/extra-packages
+
+    cp -r \
+        /tmp/store-apk-repo/run/arm64/* \
+        /home/build/immortalwrt/extra-packages/
+
+    echo "✅ APK / RUN 文件已复制到 extra-packages"
+
+    # 25.12.x APK package preparation
+    sh shell/apk-prepare-packages.sh
+
+    echo "=== APK packages ==="
+
+    ls -lah /home/build/immortalwrt/packages/ || true
+
+fi
+
+###############################################################################
+# 8. Repository architecture priority
+#
+# 保留 N1 24.x 的架构优先级。
+#
+# N1 / S905D = Cortex-A53 / aarch64。
+###############################################################################
+
+if [ -f repositories.conf ]; then
+
+    if ! grep -q '^arch aarch64_generic ' repositories.conf; then
+        sed -i '1i\
+arch aarch64_generic 10\
+arch aarch64_cortex-a53 15' repositories.conf
+    fi
+
+fi
+
+###############################################################################
+# 9. Merge custom packages
+###############################################################################
+
 PACKAGES="$PACKAGES $CUSTOM_PACKAGES"
 
-# 若构建openclash 则添加内核
+echo "============================================================"
+echo "N1 25.12 package list:"
+echo "$PACKAGES"
+echo "============================================================"
+
+###############################################################################
+# 10. OpenClash
+#
+# 25.12.x 使用 APK。
+###############################################################################
+
 if echo "$PACKAGES" | grep -q "luci-app-openclash"; then
-    echo "✅ 已选择 luci-app-openclash，添加 openclash core"
+
+    echo "✅ 已选择 luci-app-openclash，添加 OpenClash core"
+
     mkdir -p files/etc/openclash/core
-    # Download clash_meta
+
+    # Clash Meta core
     META_URL="https://raw.githubusercontent.com/vernesong/OpenClash/core/master/meta/clash-linux-arm64.tar.gz"
-    wget -qO- $META_URL | tar xOvz > files/etc/openclash/core/clash_meta
+
+    wget -qO- "$META_URL" \
+        | tar xOvz \
+        > files/etc/openclash/core/clash_meta
+
     chmod +x files/etc/openclash/core/clash_meta
-    # Download GeoIP and GeoSite
-    wget -q https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat -O files/etc/openclash/GeoIP.dat
-    wget -q https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat -O files/etc/openclash/GeoSite.dat
-    # Download latest openclash Client
-    URL=$(curl -s https://api.github.com/repos/vernesong/OpenClash/releases/latest \
-      | grep "browser_download_url.*ipk" \
-      | head -n1 \
-      | cut -d '"' -f 4)
-    echo "OpenClash latest ipk: $URL"
-    wget "$URL" -P /home/build/immortalwrt/packages/
+
+    # GeoIP
+    wget -q \
+        https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat \
+        -O files/etc/openclash/GeoIP.dat
+
+    # GeoSite
+    wget -q \
+        https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat \
+        -O files/etc/openclash/GeoSite.dat
+
+    # OpenClash APK
+    URL=$(
+        curl -fsSL \
+            https://api.github.com/repos/vernesong/OpenClash/releases/latest \
+        | grep 'browser_download_url.*apk' \
+        | head -n1 \
+        | cut -d '"' -f 4
+    )
+
+    if [ -z "$URL" ]; then
+        echo "❌ 无法取得 OpenClash APK 下载地址"
+        exit 1
+    fi
+
+    echo "OpenClash APK:"
+    echo "$URL"
+
+    wget "$URL" \
+        -P /home/build/immortalwrt/packages/
+
 else
+
     echo "⚪️ 未选择 luci-app-openclash"
+
 fi
+
+###############################################################################
+# 11. SSR Plus / Mihomo
+#
+# 保留原 N1 逻辑。
+###############################################################################
 
 if echo "$PACKAGES" | grep -q "luci-app-ssr-plus"; then
+
     echo "✅ 已选择 luci-app-ssr-plus，添加 mihomo core"
+
     mkdir -p files/usr/bin
-    # Download mihomo
+
     MIHOMO_URL="https://github.com/MetaCubeX/mihomo/releases/download/v1.19.24/mihomo-linux-arm64-v1.19.24.gz"
-    mkdir -p files/usr/bin
-    wget -qO- "$MIHOMO_URL" | gzip -dc > files/usr/bin/mihomo
+
+    wget -qO- "$MIHOMO_URL" \
+        | gzip -dc \
+        > files/usr/bin/mihomo
+
     chmod +x files/usr/bin/mihomo
+
     echo "✅ 已下载 mihomo core"
-    ls -lah files/usr/bin
+
+    ls -lah files/usr/bin/mihomo
+
 else
+
     echo "⚪️ 未选择 luci-app-ssr-plus"
+
 fi
 
+###############################################################################
+# 12. Build N1 image
+#
+# PROFILE / ROOTFS_PARTSIZE 继续由 GitHub Actions 提供。
+#
+# FILES 使用原 N1 24.x 的 /home/build/immortalwrt/files。
+###############################################################################
 
-# 构建镜像
-echo "$(date '+%Y-%m-%d %H:%M:%S') - Building image with the following packages:"
-echo "$PACKAGES"
+echo "============================================================"
+echo "开始构建 ImmortalWrt 25.12.x N1"
+echo "PROFILE          = $PROFILE"
+echo "ROOTFS_PARTSIZE  = $ROOTFS_PARTSIZE"
+echo "============================================================"
 
-make image PROFILE=$PROFILE PACKAGES="$PACKAGES" FILES="/home/build/immortalwrt/files" ROOTFS_PARTSIZE=$ROOTFS_PARTSIZE
+make image \
+    PROFILE="$PROFILE" \
+    PACKAGES="$PACKAGES" \
+    FILES="/home/build/immortalwrt/files" \
+    ROOTFS_PARTSIZE="$ROOTFS_PARTSIZE"
 
-if [ $? -ne 0 ]; then
-    echo "$(date '+%Y-%m-%d %H:%M:%S') - Error: Build failed!"
-    exit 1
-fi
+###############################################################################
+# 13. Result
+###############################################################################
 
-echo "$(date '+%Y-%m-%d %H:%M:%S') - Build completed successfully."
+echo "============================================================"
+echo "✅ ImmortalWrt 25.12.x N1 build completed successfully."
+echo "============================================================"
