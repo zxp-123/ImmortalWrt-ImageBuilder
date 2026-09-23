@@ -171,8 +171,8 @@ jobs:
     - name: Initialization environment
       run: |
         sudo apt-get update
-        sudo apt-get install -y gettext kpartx losetup e2fsprogs dosfstools
-
+        sudo apt-get install -y gettext kpartx util-linux e2fsprogs dosfstools
+        
     - name: Pre-download APK Packages
       run: |
         chmod +x shell/apk-custom-packages.sh || true
