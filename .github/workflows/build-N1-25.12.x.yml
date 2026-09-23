@@ -9,13 +9,6 @@ on:
         type: choice
         options:
           - 25.12.0
-          - 24.10.0
-          - 24.10.1
-          - 24.10.2
-          - 24.10.3
-          - 24.10.4
-          - 24.10.5
-          - 24.10.6
       openwrt_kernel:
         description: "选择构建的内核(斐讯N1)"
         required: false
@@ -178,7 +171,7 @@ jobs:
     - name: Initialization environment
       run: |
         sudo apt-get update
-        sudo apt-get install -y gettext
+        sudo apt-get install -y gettext kpartx losetup e2fsprogs dosfstools
 
     - name: Pre-download APK Packages
       run: |
@@ -186,6 +179,19 @@ jobs:
         if [ -f "shell/apk-custom-packages.sh" ]; then
           ./shell/apk-custom-packages.sh
         fi
+
+    - name: Check essential build files
+      run: |
+        mkdir -p out packages
+        if [ ! -f "${{ env.CONFIG_FILE }}" ]; then
+          echo "Error: Config file ${{ env.CONFIG_FILE }} does not exist!"
+          exit 1
+        fi
+        if [ ! -f "${{ env.BUILD_SCRIPT }}" ]; then
+          echo "Error: Build script ${{ env.BUILD_SCRIPT }} does not exist!"
+          exit 1
+        fi
+        chmod +x ${{ env.BUILD_SCRIPT }}
 
     - name: Run ImageBuilder
       env:
@@ -195,8 +201,7 @@ jobs:
         ROOTFS_SIZE: ${{ github.event.inputs.rootfs_size }}
         ENABLE_APP_STORE: ${{ github.event.inputs.enable_app_store }}
       run: |
-        chmod +x ${{ env.BUILD_SCRIPT }}
-        docker run --rm \
+        docker run --rm --privileged \
           -e LUCI_VERSION="${LUCI_VERSION}" \
           -e OPENWRT_KERNEL="${OPENWRT_KERNEL}" \
           -e INCLUDE_DOCKER="${INCLUDE_DOCKER}" \
