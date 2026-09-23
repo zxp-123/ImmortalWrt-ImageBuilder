@@ -1,15 +1,31 @@
 #!/bin/bash
 
 # ==============================================================================
-# ImmortalWrt 25.12.x - Phicomm N1 (Fully Hardened & Fixed Build Script)
+# ImmortalWrt 25.12.x - Phicomm N1 (Fully Hardened & Self-Correcting Script)
 # ==============================================================================
 
 set -e
 
-# 1. 锁定根目录与基础变量
-export IB_ROOT="/home/build/immortalwrt"
-cd "$IB_ROOT"
+# 1. 智能寻找真正的 ImageBuilder 根目录（防目录嵌套报错的核心）
+BASE_DIR="/home/build/immortalwrt"
+if [ ! -f "$BASE_DIR/Makefile" ]; then
+    echo "⚠️ 检测到 $BASE_DIR 下缺少 Makefile，正在寻找真实解压目录..."
+    REAL_IB_DIR=$(find "$BASE_DIR" -maxdepth 2 -type f -name "Makefile" -exec dirname {} \; | head -n 1)
+    if [ -n "$REAL_IB_DIR" ] && [ -d "$REAL_IB_DIR" ]; then
+        echo "✅ 找到真实的 ImageBuilder 目录: $REAL_IB_DIR"
+        export IB_ROOT="$REAL_IB_DIR"
+    else
+        echo "❌ 错误: 无法在 $BASE_DIR 中找到包含 Makefile 的 ImageBuilder 目录！"
+        exit 1
+    fi
+else
+    export IB_ROOT="$BASE_DIR"
+fi
 
+cd "$IB_ROOT"
+echo "📂 当前工作目录已锁定为: $(pwd)"
+
+# 2. 环境变量初始化
 export PROFILE="${PROFILE:-generic}"
 if [ -z "${KERNEL_PATCHVER}" ] && [ -n "${OPENWRT_KERNEL}" ]; then
     export KERNEL_PATCHVER=$(echo "${OPENWRT_KERNEL}" | cut -d. -f1,2)
@@ -25,7 +41,7 @@ echo "   - KERNEL_PATCHVER = $KERNEL_PATCHVER"
 echo "   - ROOTFS_PARTSIZE = $ROOTFS_PARTSIZE"
 echo "============================================================"
 
-# 2. 提前在绝对路径下修复 ImageBuilder 的内核版本映射文件（根除 target.mk 报错）
+# 3. 修复 ImageBuilder 内核版本映射文件
 echo "🛠️ 正在检查并修复内核版本映射文件..."
 TARGET_GENERIC_DIR="$IB_ROOT/target/linux/generic"
 if [ -d "$TARGET_GENERIC_DIR" ]; then
@@ -40,11 +56,9 @@ if [ -d "$TARGET_GENERIC_DIR" ]; then
             echo "   ⚠️ 已自动生成 kernel-${KERNEL_PATCHVER} 占位文件"
         fi
     fi
-else
-    echo "⚠️ 警告: 未找到 $TARGET_GENERIC_DIR 目录，跳过内核文件补全。"
 fi
 
-# 3. 加载第三方 APK 软件包选择
+# 4. 加载第三方 APK 软件包选择
 if [ -f "shell/apk-custom-packages.sh" ]; then
     source shell/apk-custom-packages.sh
 fi
@@ -53,7 +67,7 @@ echo "📦 第三方 APK 软件包: $CUSTOM_PACKAGES"
 LOGFILE="/tmp/uci-defaults-log.txt"
 echo "Starting N1 25.12 build at $(date)" >> "$LOGFILE"
 
-# 4. 基础软件包组合
+# 5. 基础软件包组合
 PACKAGES=""
 PACKAGES="$PACKAGES curl fdisk"
 PACKAGES="$PACKAGES luci-i18n-diskman-zh-cn"
@@ -67,20 +81,20 @@ PACKAGES="$PACKAGES luci-i18n-ttyd-zh-cn"
 PACKAGES="$PACKAGES openssh-sftp-server"
 PACKAGES="$PACKAGES luci-i18n-filemanager-zh-cn"
 
-# 5. Docker 支持
+# 6. Docker 支持
 if [ "$INCLUDE_DOCKER" = "yes" ]; then
     PACKAGES="$PACKAGES luci-i18n-dockerman-zh-cn"
     echo "✅ 已选择 Docker: luci-i18n-dockerman-zh-cn"
 fi
 
-# 6. Phicomm N1 WiFi & 硬件驱动
+# 7. Phicomm N1 WiFi & 硬件驱动
 PACKAGES="$PACKAGES kmod-brcmfmac wpad-basic-mbedtls iw iwinfo"
 PACKAGES="$PACKAGES perlbase-base perlbase-file perlbase-time perlbase-utf8 perlbase-xsloader"
 
-# 7. Amlogic / 晶晨宝盒
+# 8. Amlogic / 晶晨宝盒
 CUSTOM_PACKAGES="$CUSTOM_PACKAGES luci-app-amlogic luci-i18n-amlogic-zh-cn"
 
-# 8. 同步第三方 APK 软件仓库
+# 9. 同步第三方 APK 软件仓库
 if [ -z "$CUSTOM_PACKAGES" ]; then
     echo "⚪️ 未选择任何第三方 APK 软件包"
 else
@@ -99,7 +113,7 @@ else
     ls -lah "$IB_ROOT/packages/" || true
 fi
 
-# 9. 架构优先级配置
+# 10. 架构优先级配置
 if [ -f "repositories.conf" ]; then
     if ! grep -q '^arch aarch64_generic ' repositories.conf; then
         sed -i '1i\
@@ -108,10 +122,10 @@ arch aarch64_cortex-a53 15' repositories.conf
     fi
 fi
 
-# 10. 合并自定义包
+# 11. 合并自定义包
 PACKAGES="$PACKAGES $CUSTOM_PACKAGES"
 
-# 11. OpenClash 核心与插件处理
+# 12. OpenClash 核心与插件处理
 if echo "$PACKAGES" | grep -q "luci-app-openclash"; then
     echo "✅ 已选择 luci-app-openclash，添加 OpenClash core"
     mkdir -p files/etc/openclash/core
@@ -133,7 +147,7 @@ else
     echo "⚪️ 未选择 luci-app-openclash"
 fi
 
-# 12. SSR Plus / Mihomo 处理
+# 13. SSR Plus / Mihomo 处理
 if echo "$PACKAGES" | grep -q "luci-app-ssr-plus"; then
     echo "✅ 已选择 luci-app-ssr-plus，添加 mihomo core"
     mkdir -p files/usr/bin
@@ -144,13 +158,12 @@ else
     echo "⚪️ 未选择 luci-app-ssr-plus"
 fi
 
-# 13. 执行最终镜像编译 (强制锁定绝对路径与 TOPDIR，杜绝 Makefile 丢失错误)
+# 14. 执行最终镜像编译（在确保持有 Makefile 的真实目录下执行）
 echo "============================================================"
 echo "🚀 开始构建 ImmortalWrt 25.12.x N1 镜像..."
 echo "============================================================"
 
 make image \
-    TOPDIR="$IB_ROOT" \
     PROFILE="$PROFILE" \
     PACKAGES="$PACKAGES" \
     FILES="$IB_ROOT/files" \
