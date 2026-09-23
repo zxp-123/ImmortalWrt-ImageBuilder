@@ -145,6 +145,21 @@ on:
           - 6.12.57
           - 6.12.62
           - 6.12.65
+      include_docker:
+        description: "是否安装 Docker"
+        required: false
+        default: true
+        type: boolean
+      rootfs_size:
+        description: "根分区大小 (MB)"
+        required: false
+        default: "1024"
+        type: string
+      enable_app_store:
+        description: "是否集成第三方软件商店/iStore"
+        required: false
+        default: true
+        type: boolean
 
 env:
   TAG_NAME: n1
@@ -176,18 +191,24 @@ jobs:
       env:
         LUCI_VERSION: ${{ github.event.inputs.luci_version }}
         OPENWRT_KERNEL: ${{ github.event.inputs.openwrt_kernel }}
+        INCLUDE_DOCKER: ${{ github.event.inputs.include_docker }}
+        ROOTFS_SIZE: ${{ github.event.inputs.rootfs_size }}
+        ENABLE_APP_STORE: ${{ github.event.inputs.enable_app_store }}
       run: |
         chmod +x ${{ env.BUILD_SCRIPT }}
         docker run --rm \
           -e LUCI_VERSION="${LUCI_VERSION}" \
           -e OPENWRT_KERNEL="${OPENWRT_KERNEL}" \
+          -e INCLUDE_DOCKER="${INCLUDE_DOCKER}" \
+          -e ROOTFS_SIZE="${ROOTFS_SIZE}" \
+          -e ENABLE_APP_STORE="${ENABLE_APP_STORE}" \
           -v ${{ github.workspace }}/out:/home/build/immortalwrt/bin \
           -v ${{ github.workspace }}/${{ env.CONFIG_FILE }}:/home/build/immortalwrt/.config \
-          -v ${{ github.workspace }}/${{ env.BUILD_SCRIPT }}:/home/build/immortalwrt/build.sh \
+          -v ${{ github.workspace }}/${{ env.BUILD_SCRIPT }}:/home/build/immortalwrt/build25.sh \
           -v ${{ github.workspace }}/packages:/home/build/immortalwrt/packages \
           -w /home/build/immortalwrt \
           ${{ env.DOCKER_IMAGE }} \
-          /bin/bash /home/build/immortalwrt/build.sh
+          /bin/bash /home/build/immortalwrt/build25.sh
 
     - name: Upload firmware to release
       uses: softprops/action-gh-release@v1
