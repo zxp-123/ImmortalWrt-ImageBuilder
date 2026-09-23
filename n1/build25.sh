@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ==============================================================================
-# ImmortalWrt 25.12.x - Phicomm N1 (Final Hardened Build Script)
+# ImmortalWrt 25.12.x - Phicomm N1 (Final Complete Build Script)
 # ==============================================================================
 
 set -e
@@ -158,15 +158,13 @@ else
     echo "⚪️ 未选择 luci-app-ssr-plus"
 fi
 
-# 14. 执行最终镜像编译（清除残留 TOPDIR，强制锁定 Makefile 所在根目录）
+# 14. 执行最终镜像编译（显式指定 TOPDIR="$IB_ROOT" 防止 target.mk 读取错误路径）
 echo "============================================================"
 echo "🚀 开始构建 ImmortalWrt 25.12.x N1 镜像..."
 echo "============================================================"
 
-unset TOPDIR
-
 make image \
-    TOPDIR="$(pwd)" \
+    TOPDIR="$IB_ROOT" \
     PROFILE="$PROFILE" \
     PACKAGES="$PACKAGES" \
     FILES="$IB_ROOT/files" \
